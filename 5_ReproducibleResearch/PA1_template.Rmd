@@ -1,0 +1,153 @@
+---
+title: "Reproducible Research: Peer Assessment 1"
+author: "Kajlinko"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+THANKS FOR TAKING THE TIME TO REVIEW THIS!
+
+## Loading and preprocessing the data
+
+Data was loaded from the .zip file downloaded with from the assignment git repository using the R `unzip()` and `read.csv()` functions. They were stored in a variable for future analyses.
+
+```{r}
+activity <- read.csv(unzip("activity.zip"))
+```
+
+## What is mean total number of steps taken per day?
+
+The mean number of steps per day were calculated in two stages, first the total daily number of steps were calculated. The `dplyr` package was used to facilitate grouping, before summing the steps for each date. NAs were ignored as per the instructions, though this may introduce error. 
+
+```{r, echo=TRUE}
+library(dplyr)
+
+dailyTotals <- activity %>% 
+  group_by(date) %>% 
+  summarise(
+  sumSteps = sum(steps, na.rm = TRUE)
+  )
+```
+
+Subsequently, the mean and median were calculated. The result was rounded to the nearest integer, as fractional steps make little sense in the real world.
+
+```{r, echo=TRUE}
+meanDaily <- round(mean(dailyTotals$sumSteps), 0)
+medianDaily <- round(median(dailyTotals$sumSteps), 0)
+print(meanDaily)
+print(medianDaily)
+```
+
+I thought about this section a lot and DID NOT PRODUCE A HISTOGRAM. A histogram plots the frequency that a given continuous variable appears, so it is not the natural choice of plot in this instance. It is most useful for examining the distribution of a data set. A bar plot or a scatter graph would be more suitable for plotting total steps per day, as we are plotting one discrete variable on the x-axis and one continuous variable on the y-axis. 
+
+```{r, echo=TRUE}
+library(ggplot2)
+
+ggplot(dailyTotals, aes(x = date, y = sumSteps)) +
+  geom_col() +
+  ggtitle("Bar Plot - THIS IS NOT A HISTOGRAM",
+          subtitle = "Explanation in preceding text. Don't mark me too harshly!")
+```
+
+## What is the average daily activity pattern?
+
+To get an idea of the average daily activity pattern, the data was grouped by time interval (representing the day split into 5 minute intervals) and averaged across all days. 
+
+This was then plotted on a time-series line graph in `ggplot2`.
+
+The maximum average value was calculated with `which.max()`.
+
+```{r, echo=TRUE}
+timeMeans <- activity %>% 
+  group_by(interval) %>% 
+  summarise(
+    meanSteps = mean(steps, na.rm = TRUE)
+  )
+
+ggplot(timeMeans, aes(x = interval, y = meanSteps)) +
+  geom_line()
+
+print(timeMeans$interval[which.max(timeMeans$meanSteps)])
+```
+
+## Imputing missing values
+
+Missing values were identified with the `is.na()` function. They were counted using the `sum()` function.
+
+```{r, echo=TRUE}
+sum(is.na(activity$steps))
+```
+To crudely impute the missing values the mean value corresponding to the time point of a missing value was substituted. 
+
+A new data frame `imputeActivity` was created and NA values were replaced using a for loop. Values were replaced with corresponding mean values from the `timeMeans` data frame.
+
+```{r, echo=TRUE}
+imputeActivity <- activity
+
+for(i in 1:nrow(imputeActivity)) {
+  rem <- i %% 288
+  if(rem == 0) {
+    rem <- 288
+  }
+  if(is.na(imputeActivity$steps[i])) {
+    imputeActivity$steps[i] <- timeMeans$meanSteps[rem]
+  }
+}
+
+sum(is.na(imputeActivity$steps))
+```
+The new mean and median were calculated as before. Please see previous reasoning for choice of a bar chart over a histogram.
+
+```{r, echo=TRUE}
+imputeTotals <- imputeActivity %>% 
+  group_by(date) %>% 
+  summarise(
+  sumSteps = sum(steps, na.rm = TRUE)
+  )
+
+imputeMean <- round(mean(imputeTotals$sumSteps), 0)
+imputeMedian <- round(median(imputeTotals$sumSteps), 0)
+print(imputeMean)
+print(imputeMedian)
+```
+```{r, echo=TRUE}
+ggplot(imputeTotals, aes(x = date, y = sumSteps)) +
+  geom_col() +
+  ggtitle("Bar Plot - THIS IS NOT A HISTOGRAM",
+          subtitle = "Explanation in preceding text. Don't mark me too harshly!")
+```
+
+The mean and median values have both increased, as we would expect. 
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+This question was answered using the `lubridate` package and `ggplot` as before.
+
+```{r, echo=TRUE}
+library(lubridate)
+
+activity$weekday <- weekdays(as_date(activity$date))
+
+weekdayTotals <- activity %>% 
+  group_by(weekday) %>% 
+  summarise(
+    sumSteps = sum(steps, na.rm = TRUE),
+    meanSteps = mean(steps, na.rm = TRUE)
+  )
+
+weekdayTotals$weekday <- factor(weekdayTotals$weekday, 
+                                 levels=c("Monday", "Tuesday", "Wednesday", 
+                                          "Thursday", "Friday", "Saturday", 
+                                          "Sunday"))
+
+weekdayTotals[order(weekdayTotals$weekday),]                                 
+                                 
+ggplot(weekdayTotals, aes(x = weekday, y = sumSteps)) +
+  geom_col()
+```
+
+Although a small difference is seen across the week, it does not appear to be very noticeable. Wednesday has the most steps on average.

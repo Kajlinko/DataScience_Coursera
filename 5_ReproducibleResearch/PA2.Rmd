@@ -1,0 +1,199 @@
+---
+title: "stormreport.Rmd"
+author: "Kyle Wilson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary
+
+## Aims
+To use publically available weather data from the NOAA Storms Database to evaluate the human and property cost of various whether events in the United States.
+
+## Methods
+Data was downloaded and cleaned from the NOAA Storm Database. Data analysis was performed with R v4.2.1 using R Studio v2022.12.0+353.
+
+## Results
+Tornados were most significantly affecting human health. Tsumanis and hurricanes had the greatest impact on property and crop damage. 
+
+# Data Processing
+
+## Loading data
+
+Data for this report were download as a zipped `.bz2` file from the course website (Coursera) and data was stored as a dataframe in the variable `stormdata` for analysis.
+
+```{r}
+download.file(
+  "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2",
+  "stormdata.csv.bz2")
+
+stormdata <- read.csv("stormdata.csv.bz2")
+```
+
+## Cleaning data
+
+The main objective in this study is to evaluate the human and economic cost of severe weather events across the United States using publically available data from the NOAA Storm Database.
+
+Early data is often incomplete and the US national economy and climate has changed significantly over the study period. In an attempt to ensure the data is applicable to today's economy and climate, a decision was made to use data from the most recent year in the study.
+
+The most recent results are from 2011. 
+
+```{r}
+tail(stormdata$BGN_DATE)
+```
+Accordingly, an additional column was added which provides the year of the observation. The original date is preserved, in case it is useful for later analyses. Subsequently, the `dplyr` package is loaded and data is filtered by year to included only data from 2011 onwards.
+
+```{r}
+stormdata$BGN_DATE <- as.POSIXct(stormdata$BGN_DATE, format = "%m/%d/%Y %H:%M:%S")
+stormdata$BGN_YEAR <- format(stormdata$BGN_DATE, "%Y")
+
+library(dplyr)
+
+stormdata <- filter(stormdata, BGN_YEAR >= 2011)
+```
+
+We are most interested in the type of event and the human and economic impacts. The human impact is described by the variables 'FATALITIES' and 'INJURIES'. These variables were subset into a new dataframe `dat` with  'BGN_DATE', 'STATE' and 'EVTYPE'. For this analysis, whether the fatality/injury was direct or indirect was not considered. The economic impact is described by the variables 'PROPDMG' and 'CROPDMG'. The 'PROPDMGEXP' and 'CROPDMGEXP' provide a multiplicative factor to scale the integer in the original variable by 10^3, 10^6 or 10^9. This was factored in to the 'PROPDMG' and 'CROPDMG' variables and the factor variables were removed. To improve readability, the costs of property and crop damage were converted to integers.
+
+```{r}
+dat <- stormdata[, c("BGN_DATE", "STATE", "EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+
+for(i in 1:nrow(dat)) {
+  if(dat$PROPDMGEXP[i] == "K"){
+    dat$PROPDMG[i] <- dat$PROPDMG[i]*1000
+  } else if(dat$PROPDMGEXP[i] == "M"){
+      dat$PROPDMG[i] <- dat$PROPDMG[i]*1000000
+  } else if(dat$PROPDMGEXP[i] == "B"){
+    dat$PROPDMG[i] <- dat$PROPDMG[i]*1000000000
+  }
+}
+  
+for(i in 1:nrow(dat)) {
+  if(dat$CROPDMGEXP[i] == "K"){
+    dat$CROPDMG[i] <- dat$CROPDMG[i]*1000
+  } else if(dat$CROPDMGEXP[i] == "M"){
+      dat$CROPDMG[i] <- dat$CROPDMG[i]*1000000
+  } else if(dat$CROPDMGEXP[i] == "B") {
+    dat$CROPDMG[i] <- dat$CROPDMG[i]*1000000000
+  }
+}
+
+dat <- dat[-c(7,9)]
+
+dat$PROPDMG <- as.integer(dat$PROPDMG)
+dat$CROPDMG <- as.integer(dat$CROPDMG)
+```
+
+Finally, the event types were converted to lower case.
+
+```{r}
+dat$EVTYPE <- tolower(dat$EVTYPE)
+```
+
+# Results
+
+## Descriptive statistics
+
+This study identified 46 unique weather events in 2011. 
+
+```{r}
+length(unique(dat$EVTYPE))
+```
+Using the `tidyr` packages `group_by()` and `summarise()` functions the events were grouped before average numbers of fatalities and injuries, as well as damage costs were calculated. The `sum()` function was used because total cost from a specific type of event over the year studied seems to be the most significant statistic. An event that is costly but rarely occurs may or may not have a greater health and economic impact than an event which occurs frequently but costs less. 
+
+```{r}
+library(tidyr)
+summary_df <- dat %>%
+  group_by(EVTYPE) %>%
+  summarise(
+    number = n(),
+    sum_fatalities = sum(FATALITIES),
+    sum_injuries = sum(INJURIES),
+    sum_prop = as.integer(sum(mean(PROPDMG))),
+    sum_crop = as.integer(sum(mean(CROPDMG))),
+  ) %>% as.data.frame()
+
+print(summary_df)
+```
+
+## Plotting the health costs and property damage costs
+
+The total human cost is displayed as bar charts showing the number of fatalities and the number of injuries per weather event type. Events with no fatalities or injuries were removed from the data. The `ggplot` package was used to display this information and they were combined into a single figure with `grid.arrange()` from the `gridExtra` package.
+
+```{r}
+library(ggplot2)
+
+health_cost <- summary_df[-c(5,6)] %>%
+  filter(sum_fatalities != 0 | sum_injuries != 0)
+
+fat <- health_cost %>%
+  arrange(desc(sum_fatalities))
+
+fat$EVTYPE <- as.factor(fat$EVTYPE)
+
+fat_graph <- fat %>% 
+  mutate(EVTYPE = factor(EVTYPE, levels = EVTYPE)) %>%
+  ggplot(aes(x = EVTYPE, y = sum_fatalities)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Fatalities by Weather Event", x = "Weather Event", 
+       y = "No. of Fatalities")
+
+inj <- health_cost %>%
+  arrange(desc(sum_injuries))
+
+inj$EVTYPE <- as.factor(inj$EVTYPE)
+
+inj_graph <- inj %>% 
+  mutate(EVTYPE = factor(EVTYPE, levels = EVTYPE)) %>%
+  ggplot(aes(x = EVTYPE, y = sum_injuries)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Injuries by Weather Event", x = "Weather Event", 
+       y = "No. of Injuries")
+
+library(gridExtra)
+
+grid.arrange(fat_graph, inj_graph, ncol = 2)
+```
+
+A similar analysis was performed to display the economical costs.
+
+```{r}
+prop_cost <- summary_df[-c(3,4)] %>%
+  filter(sum_prop != 0 | sum_crop != 0)
+
+prop <- prop_cost %>%
+  arrange(desc(sum_prop))
+
+prop$EVTYPE <- as.factor(prop$EVTYPE)
+
+prop_graph <- prop %>% 
+  mutate(EVTYPE = factor(EVTYPE, levels = EVTYPE)) %>%
+  ggplot(aes(x = EVTYPE, y = sum_prop)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Property Damage Cost by Weather Event", x = "Weather Event", y = "Cost in USD")
+
+crop <- prop_cost %>%
+  arrange(desc(sum_crop))
+
+crop$EVTYPE <- as.factor(crop$EVTYPE)
+
+crop_graph <- crop %>% 
+  mutate(EVTYPE = factor(EVTYPE, levels = EVTYPE)) %>%
+  ggplot(aes(x = EVTYPE, y = sum_crop)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Crop Damage Cost by Weather Event", x = "Weather Event", 
+       y = "Cost in USD")
+
+grid.arrange(prop_graph, crop_graph, ncol = 2)
+```
+
+# Conclusion
+
+This concludes the analysis. Tornadoes appear to have the biggest impact on human health, whereas tsunamis and hurricanes appear to do the greatest amount of damage to property and crops.
